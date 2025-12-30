@@ -1,64 +1,59 @@
-﻿import { headers } from "next/headers";
-
-/**
- * app/api/webhook/route.js
- * - Lazy requires stripe and prisma
- * - Guards against missing STRIPE_WEBHOOK_SECRET
- * - Safe for Vercel build
- */
+// app/api/webhook/route.js
+import { headers } from 'next/headers'
 
 export async function POST(req) {
-  const body = await req.text();
-  const sig = headers().get("stripe-signature");
+  const body = await req.text()
+  const sig = headers().get('stripe-signature')
 
-  if (!process.env.STRIPE_WEBHOOK_SECRET) {
-    console.warn("STRIPE_WEBHOOK_SECRET not set — skipping webhook processing.");
-    return new Response("webhook ignored (no secret)", { status: 200 });
+  if (!process.env.STRIPE_WEBHOOK_SECRET || !process.env.STRIPE_SECRET_KEY) {
+    console.warn('Stripe webhook skipped: STRIPE_WEBHOOK_SECRET or STRIPE_SECRET_KEY not set')
+    return new Response('webhook skipped', { status: 200 })
   }
 
-  let stripe;
+  let stripe
   try {
-    // lazy require stripe lib (lib/stripe exports { stripe })
-    stripe = require("../../../lib/stripe").stripe;
+    stripe = require('../../../lib/stripe').getStripe()
+    if (!stripe) throw new Error('Stripe client init failed')
   } catch (e) {
-    console.error("Stripe lib not available", e?.message || e);
-    return new Response("stripe lib missing", { status: 500 });
+    console.error('Stripe init error', e?.message || e)
+    return new Response('stripe init error', { status: 500 })
   }
 
-  let event;
+  let event
   try {
-    event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET)
   } catch (err) {
-    console.error("Webhook signature error", err?.message || err);
-    return new Response("Webhook Error", { status: 400 });
+    console.error('Webhook signature error', err?.message || err)
+    return new Response('Webhook signature mismatch', { status: 400 })
   }
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
-    const metadata = session.metadata || {};
+  // handle events
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object
+    const metadata = session.metadata || {}
     try {
-      const { getPrisma } = require("../../../lib/db");
-      const prisma = getPrisma();
+      const { getPrisma } = require('../../../lib/db')
+      const prisma = getPrisma()
       if (prisma && metadata.projectId) {
         await prisma.payment.create({
           data: {
-            amount: Math.round(session.amount_total / 100),
-            status: "paid",
+            amount: Math.round((session.amount_total || 0) / 100),
+            status: 'paid',
             stripeId: session.id,
-            projectId: metadata.projectId,
-          },
-        });
+            projectId: metadata.projectId
+          }
+        })
         await prisma.project.update({
           where: { id: metadata.projectId },
-          data: { status: "paid" },
-        });
+          data: { status: 'paid' }
+        })
       } else {
-        console.log("Prisma unavailable or no projectId in metadata — skipping DB write.");
+        console.log('Webhook: prisma unavailable or projectId missing — skipped DB write')
       }
-    } catch (e) {
-      console.error("Prisma webhook error", e?.message || e);
+    } catch (dbErr) {
+      console.error('Webhook DB error:', dbErr?.message || dbErr)
     }
   }
 
-  return new Response("ok");
+  return new Response('ok', { status: 200 })
 }
