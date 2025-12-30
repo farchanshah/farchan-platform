@@ -1,19 +1,17 @@
-﻿import React from "react";
+// app/admin/page.jsx
+import React from 'react'
 
 export default async function Admin() {
-  let projects = [];
+  let projects = []
   try {
-    // lazy-require prisma
-    const { getPrisma } = require("../../lib/db");
-    const prisma = getPrisma();
+    const { getPrisma } = require('../../lib/db')
+    const prisma = getPrisma()
     if (prisma) {
-      projects = await prisma.project.findMany({ include: { client: true } });
-    } else {
-      projects = [];
+      projects = await prisma.project.findMany({ include: { client: true } })
     }
   } catch (e) {
-    console.error("Admin page prisma error:", e?.message || e);
-    projects = [];
+    console.warn('Admin page error:', e?.message || e)
+    projects = []
   }
 
   return (
@@ -33,5 +31,5 @@ export default async function Admin() {
         )}
       </div>
     </main>
-  );
+  )
 }
