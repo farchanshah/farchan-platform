@@ -1,5 +1,5 @@
 import Link from 'next/link'
-export default function Header(){
+export default function Header() {
   return (
     <header className="w-full border-b">
       <div className="max-w-6xl mx-auto flex items-center justify-between p-4">
